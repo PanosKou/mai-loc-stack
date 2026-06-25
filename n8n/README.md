@@ -22,6 +22,24 @@ From the n8n container, the LangGraph gateway should be reachable at:
 http://langgraph-gateway:8000
 ```
 
+## Python requirement
+
+Use the n8n Code node with Python.
+
+Recommended n8n runtime:
+
+```text
+n8n v2.x native Python
+```
+
+Minimum expected runtime:
+
+```text
+n8n >= 1.111.0 with task runners and native Python enabled
+```
+
+Avoid the old Pyodide Python mode for this workflow.
+
 ## Workflow shape
 
 Use this n8n workflow shape:
@@ -44,16 +62,17 @@ Recommended node name:
 Resolve Assistant Profile
 ```
 
-Code node mode:
+Code node settings:
 
 ```text
-Run Once for Each Item
+Language: Python
+Mode:     Run Once for All Items
 ```
 
 Paste the contents of:
 
 ```text
-n8n/personal-assistant-profile-router.code.js
+n8n/personal-assistant-profile-router.code.py
 ```
 
 The node accepts any of these selector fields:
@@ -73,6 +92,12 @@ hospitality_assistant
 ```
 
 Aliases such as `general`, `secretary`, `hospitality`, `hut_ai`, `travel_agent`, `hotel`, `airbnb`, `booking_host`, and `property_manager` are mapped automatically.
+
+The Code node prepares the LangGraph request payload under:
+
+```text
+$json.llm
+```
 
 ## 2. HTTP Request node to LangGraph
 
@@ -109,6 +134,8 @@ Use expression mode for the JSON body:
   }
 }}
 ```
+
+Note: n8n expressions are still JavaScript-style expressions even when the Code node itself is Python. This is normal n8n behaviour; it does not mean the router code is JavaScript.
 
 ## 3. Edit Fields node
 
