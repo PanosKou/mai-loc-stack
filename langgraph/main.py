@@ -871,7 +871,7 @@ async def openai_stream(request: ChatRequest, route: ModelRoute) -> AsyncIterato
             yield stream_error(
                 response_id=response_id,
                 model=route.requested_model,
-                message=str(exc),
+                message="Internal gateway error",
             )
             yield sse_done()
             return
@@ -940,7 +940,7 @@ async def openai_stream(request: ChatRequest, route: ModelRoute) -> AsyncIterato
         yield stream_error(
             response_id=response_id,
             model=route.requested_model,
-            message=str(exc),
+            message="Internal gateway error",
         )
         yield sse_done()
 
