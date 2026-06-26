@@ -2,10 +2,9 @@ import asyncio
 import logging
 from typing import Any
 
-from fastapi import HTTPException
-
 from clients import call_langgraph, scrape_url, searxng_search
 from config import settings
+from failures import ResearchFailure
 from models import ResearchRequest
 from text_utils import clean_text, truncate, clamp
 
@@ -30,13 +29,20 @@ async def collect_pages(
             text = clean_text(scraped.get("text"))
             scrape_ok = True
             scrape_error = None
-        except Exception as exc:
-            log.warning("scrape_failed url=%s error=%s", url, exc)
+        except ResearchFailure as exc:
+            log.warning("scrape_failed url=%s reason=%s", url, exc.reason)
             title = result["title"]
             h1 = ""
             text = result["snippet"]
             scrape_ok = False
-            scrape_error = str(exc)
+            scrape_error = exc.reason
+        except Exception:
+            log.warning("unexpected_scrape_error url=%s", url)
+            title = result["title"]
+            h1 = ""
+            text = result["snippet"]
+            scrape_ok = False
+            scrape_error = "unexpected_scrape_error"
 
         pages.append(
             {
@@ -109,25 +115,15 @@ async def run_research(request: ResearchRequest) -> dict[str, Any]:
         search_results = await searxng_search(task, max_results=max_results)
 
         if not search_results:
-            raise HTTPException(
-                status_code=502,
-                detail={
-                    "error": "SearXNG returned no usable HTTP/HTTPS results",
-                    "task": task,
-                },
-            )
+            log.warning("no_usable_search_results task=%r", task)
+            raise ResearchFailure("no_usable_search_results")
 
         pages = await collect_pages(search_results, max_chars_per_page=max_chars_per_page)
         context = build_context(pages)
 
         if not context.strip():
-            raise HTTPException(
-                status_code=502,
-                detail={
-                    "error": "No usable context after scraping",
-                    "task": task,
-                },
-            )
+            log.warning("no_usable_scrape_context task=%r", task)
+            raise ResearchFailure("no_usable_scrape_context")
 
         answer = await call_langgraph(task=task, context=context)
 
