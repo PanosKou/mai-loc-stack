@@ -3,12 +3,12 @@ from typing import Any
 
 import httpx
 
-from config import settings
-from failures import ResearchFailure
-from text_utils import clean_text, extract_answer, is_http_url
+from .config import settings
+from .failures import ResearchFailure
+from .text_utils import clean_text, extract_answer, is_http_url
 
 
-log = logging.getLogger("web-research-bridge.clients")
+log = logging.getLogger("mcp-agent-hub.skills.web_research.clients")
 
 
 async def searxng_search(query: str, max_results: int) -> list[dict[str, str]]:

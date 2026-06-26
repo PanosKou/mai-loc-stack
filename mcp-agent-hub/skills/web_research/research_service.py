@@ -2,14 +2,14 @@ import asyncio
 import logging
 from typing import Any
 
-from clients import call_langgraph, scrape_url, searxng_search
-from config import settings
-from failures import ResearchFailure
-from models import ResearchRequest
-from text_utils import clean_text, truncate, clamp
+from .clients import call_langgraph, scrape_url, searxng_search
+from .config import settings
+from .failures import ResearchFailure
+from .models import ResearchRequest
+from .text_utils import clean_text, truncate, clamp
 
 
-log = logging.getLogger("web-research-bridge.service")
+log = logging.getLogger("mcp-agent-hub.skills.web_research.service")
 research_semaphore = asyncio.Semaphore(settings.max_concurrent_research)
 
 

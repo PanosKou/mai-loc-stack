@@ -6,10 +6,10 @@ from typing import Any
 from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse
 
-from config import settings
-from failures import ResearchFailure
-from models import ResearchRequest
-from research_service import run_research
+from .config import settings
+from .failures import ResearchFailure
+from .models import ResearchRequest
+from .research_service import run_research
 
 
 logging.basicConfig(
@@ -17,15 +17,20 @@ logging.basicConfig(
     format="%(asctime)s %(levelname)s %(name)s %(message)s",
 )
 
-log = logging.getLogger("web-research-bridge")
+log = logging.getLogger("mcp-agent-hub.skills.web_research.app")
 
-app = FastAPI(title="Web Research Bridge", version="0.3.0")
+app = FastAPI(title="Web Research Skill", version="0.4.0")
 
 
 @app.exception_handler(ResearchFailure)
-async def research_failure_handler(request: Request, _failure: ResearchFailure) -> JSONResponse:
+async def research_failure_handler(request: Request, failure: ResearchFailure) -> JSONResponse:
     error_id = uuid.uuid4().hex[:12]
-    log.warning("web_research_failed error_id=%s route=%s", error_id, request.url.path)
+    log.warning(
+        "web_research_failed error_id=%s route=%s reason=%s",
+        error_id,
+        request.url.path,
+        failure.reason,
+    )
     return JSONResponse(
         status_code=502,
         content={"detail": {"error": "web research failed", "error_id": error_id}},
@@ -37,6 +42,7 @@ async def health() -> dict[str, Any]:
     return {
         "status": "ok",
         "mode": "langgraph",
+        "skill": "web_research",
         "searxng_url": settings.searxng_url,
         "scrape_url": settings.scrape_url,
         "llm_base_url": settings.llm_base_url,
