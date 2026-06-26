@@ -39,7 +39,11 @@ async def research(request: ResearchRequest) -> dict[str, Any]:
         return await run_research(request)
     except HTTPException:
         error_id = uuid.uuid4().hex[:12]
-        log.warning("research request failed error_id=%s", error_id)
+        log.warning(
+            "research request failed error_id=%s",
+            error_id,
+            exc_info=True,
+        )
         raise HTTPException(
             status_code=502,
             detail={
@@ -49,7 +53,11 @@ async def research(request: ResearchRequest) -> dict[str, Any]:
         ) from None
     except Exception:
         error_id = uuid.uuid4().hex[:12]
-        log.error("unhandled web research error error_id=%s", error_id)
+        log.error(
+            "unhandled web research error error_id=%s",
+            error_id,
+            exc_info=True,
+        )
         raise HTTPException(
             status_code=500,
             detail={
