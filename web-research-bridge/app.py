@@ -1,8 +1,9 @@
 import logging
 import os
+import uuid
 from typing import Any
 
-from fastapi import FastAPI
+from fastapi import FastAPI, HTTPException
 
 from config import settings
 from models import ResearchRequest
@@ -34,4 +35,30 @@ async def health() -> dict[str, Any]:
 
 @app.post("/research")
 async def research(request: ResearchRequest) -> dict[str, Any]:
-    return await run_research(request)
+    try:
+        return await run_research(request)
+    except HTTPException as exc:
+        error_id = uuid.uuid4().hex[:12]
+        log.warning(
+            "research request failed error_id=%s status_code=%s detail=%r",
+            error_id,
+            exc.status_code,
+            exc.detail,
+        )
+        raise HTTPException(
+            status_code=exc.status_code,
+            detail={
+                "error": "web research request failed",
+                "error_id": error_id,
+            },
+        ) from None
+    except Exception:
+        error_id = uuid.uuid4().hex[:12]
+        log.exception("unhandled web research error error_id=%s", error_id)
+        raise HTTPException(
+            status_code=500,
+            detail={
+                "error": "internal web research error",
+                "error_id": error_id,
+            },
+        ) from None
