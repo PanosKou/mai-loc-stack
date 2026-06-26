@@ -3,9 +3,11 @@ import os
 import uuid
 from typing import Any
 
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, Request
+from fastapi.responses import JSONResponse
 
 from config import settings
+from failures import ResearchFailure
 from models import ResearchRequest
 from research_service import run_research
 
@@ -18,6 +20,16 @@ logging.basicConfig(
 log = logging.getLogger("web-research-bridge")
 
 app = FastAPI(title="Web Research Bridge", version="0.3.0")
+
+
+@app.exception_handler(ResearchFailure)
+async def research_failure_handler(request: Request, _failure: ResearchFailure) -> JSONResponse:
+    error_id = uuid.uuid4().hex[:12]
+    log.warning("web_research_failed error_id=%s route=%s", error_id, request.url.path)
+    return JSONResponse(
+        status_code=502,
+        content={"detail": {"error": "web research failed", "error_id": error_id}},
+    )
 
 
 @app.get("/health")
@@ -35,33 +47,4 @@ async def health() -> dict[str, Any]:
 
 @app.post("/research")
 async def research(request: ResearchRequest) -> dict[str, Any]:
-    try:
-        return await run_research(request)
-    except HTTPException:
-        error_id = uuid.uuid4().hex[:12]
-        log.warning(
-            "research request failed error_id=%s",
-            error_id,
-            exc_info=True,
-        )
-        raise HTTPException(
-            status_code=502,
-            detail={
-                "error": "web research request failed",
-                "error_id": error_id,
-            },
-        ) from None
-    except Exception:
-        error_id = uuid.uuid4().hex[:12]
-        log.error(
-            "unhandled web research error error_id=%s",
-            error_id,
-            exc_info=True,
-        )
-        raise HTTPException(
-            status_code=500,
-            detail={
-                "error": "internal web research error",
-                "error_id": error_id,
-            },
-        ) from None
+    return await run_research(request)
