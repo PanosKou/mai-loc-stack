@@ -28,6 +28,9 @@ def create_mcp_server() -> FastMCP:
     skills = discover_skills()
 
     for skill in skills:
+        skill.set_skill_registry(skills)
+
+    for skill in skills:
         skill.register(mcp)
         log.info(
             "registered skill=%s tools=%s",
