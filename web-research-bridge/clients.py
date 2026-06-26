@@ -1,10 +1,14 @@
+import logging
 from typing import Any
 
 import httpx
-from fastapi import HTTPException
 
 from config import settings
+from failures import ResearchFailure
 from text_utils import clean_text, extract_answer, is_http_url
+
+
+log = logging.getLogger("web-research-bridge.clients")
 
 
 async def searxng_search(query: str, max_results: int) -> list[dict[str, str]]:
@@ -24,16 +28,15 @@ async def searxng_search(query: str, max_results: int) -> list[dict[str, str]]:
         )
 
     if response.status_code >= 400:
-        raise HTTPException(
-            status_code=502,
-            detail={
-                "error": "SearXNG request failed",
-                "status_code": response.status_code,
-                "body": response.text[:1000],
-            },
-        )
+        log.warning("searxng_request_failed status_code=%s", response.status_code)
+        raise ResearchFailure("searxng_request_failed")
 
-    payload = response.json()
+    try:
+        payload = response.json()
+    except ValueError:
+        log.warning("searxng_invalid_json")
+        raise ResearchFailure("searxng_invalid_json") from None
+
     raw_results = payload.get("results") or []
 
     results: list[dict[str, str]] = []
@@ -76,9 +79,14 @@ async def scrape_url(url: str) -> dict[str, Any]:
         )
 
     if response.status_code >= 400:
-        raise RuntimeError(f"n8n scrape failed: status={response.status_code} body={response.text[:500]}")
+        log.warning("scrape_request_failed status_code=%s", response.status_code)
+        raise ResearchFailure("scrape_request_failed")
 
-    payload = response.json()
+    try:
+        payload = response.json()
+    except ValueError:
+        log.warning("scrape_invalid_json")
+        raise ResearchFailure("scrape_invalid_json") from None
 
     if isinstance(payload, list):
         if not payload:
@@ -134,25 +142,19 @@ async def call_langgraph(task: str, context: str) -> str:
         )
 
     if response.status_code >= 400:
-        raise HTTPException(
-            status_code=502,
-            detail={
-                "error": "LangGraph chat completion failed",
-                "status_code": response.status_code,
-                "endpoint": endpoint,
-                "body": response.text[:1000],
-            },
-        )
+        log.warning("langgraph_request_failed status_code=%s", response.status_code)
+        raise ResearchFailure("langgraph_request_failed")
 
-    answer = extract_answer(response.json())
+    try:
+        payload = response.json()
+    except ValueError:
+        log.warning("langgraph_invalid_json")
+        raise ResearchFailure("langgraph_invalid_json") from None
+
+    answer = extract_answer(payload)
 
     if not answer:
-        raise HTTPException(
-            status_code=502,
-            detail={
-                "error": "LangGraph returned an empty answer",
-                "endpoint": endpoint,
-            },
-        )
+        log.warning("langgraph_empty_answer")
+        raise ResearchFailure("langgraph_empty_answer")
 
     return answer
