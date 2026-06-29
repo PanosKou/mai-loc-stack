@@ -1,0 +1,175 @@
+{
+  "name": "personal-assistant",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "personal-assistant-task",
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2.1,
+      "position": [
+        -160,
+        16
+      ],
+      "id": "e3a29022-0082-41c5-8bb6-4916c294cdf4",
+      "name": "Webhook",
+      "webhookId": "ff7e3615-b7a2-4439-88cc-dabab7e586b6"
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "d612fed7-c0cd-442f-85b2-21ba9a6fc3ef",
+              "name": "profile_name",
+              "value": "={{ $('Webhook').first().json.body.profile_name || $('Webhook').first().json.body.profile || $('Webhook').first().json.body.assistant_profile || $('Webhook').first().json.body.mode || 'general_assistant' }}",
+              "type": "string"
+            },
+            {
+              "id": "f2206a62-b57d-4648-b3ba-574ecb812ab9",
+              "name": "answer",
+              "value": "={{ $json.choices?.[0]?.message?.content ?? $json.answer ?? $json.result ?? $json.message ?? JSON.stringify($json) }}",
+              "type": "string"
+            },
+            {
+              "id": "3abbbbc6-2562-4dca-9792-f1eec8b2ed32",
+              "name": "source",
+              "value": "=n8n-personal-assistant-task",
+              "type": "string"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        528,
+        16
+      ],
+      "id": "26000941-b126-45cf-bc7e-4212976f4d0a",
+      "name": "Edit Fields"
+    },
+    {
+      "parameters": {
+        "options": {
+          "responseCode": 200
+        }
+      },
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.5,
+      "position": [
+        752,
+        16
+      ],
+      "id": "7529a2d9-b65f-411f-83e4-d85fd4109097",
+      "name": "Respond to Webhook"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "http://langgraph-gateway:8000/v1/chat/completions",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": " application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{\n  {\n    model: $json.llm.model,\n    messages: $json.llm.messages,\n    temperature: $json.llm.temperature,\n    max_tokens: $json.llm.max_tokens,\n    stream: $json.llm.stream\n  }\n}}",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        304,
+        16
+      ],
+      "id": "ef9abcb4-79d0-4b6c-9f09-82d35c50579e",
+      "name": "HTTP Request"
+    },
+    {
+      "parameters": {
+        "language": "pythonNative",
+        "pythonCode": "# n8n Code node: Resolve Assistant Profile\n#\n# Recommended settings:\n# - Language: Python\n# - Mode: Run Once for All Items\n#\n# Expected workflow:\n# Webhook -> Resolve Assistant Profile -> HTTP Request to LangGraph -> Edit Fields -> Respond to Webhook\n\n\ndef first_present(mapping, keys, default=\"\"):\n    for key in keys:\n        value = mapping.get(key)\n        if value is not None and value != \"\":\n            return value\n    return default\n\n\ndef as_clean_string(value, default=\"\"):\n    if value is None:\n        return default\n    return str(value).strip()\n\n\ndef make_profile_system_content(profile):\n    allowed_actions = \"\\n\".join(f\"- {action}\" for action in profile[\"allowed_actions\"])\n    confirmation_required = \"\\n\".join(f\"- {action}\" for action in profile[\"confirmation_required\"])\n\n    return f\"\"\"\n{profile[\"system_prompt\"]}\n\nActive assistant profile:\n{profile[\"profile_name\"]}\n\nAllowed action classes:\n{allowed_actions}\n\nActions requiring explicit user confirmation:\n{confirmation_required}\n\"\"\".strip()\n\n\nincoming = _items[0][\"json\"] if _items else {}\n\nbody = incoming.get(\"body\") if isinstance(incoming.get(\"body\"), dict) else incoming\nif not isinstance(body, dict):\n    body = {}\n\ntask = as_clean_string(\n    first_present(\n        body,\n        [\"task\", \"query\", \"message\", \"prompt\"],\n        \"\",\n    )\n)\n\nrequested_profile = as_clean_string(\n    first_present(\n        body,\n        [\"profile_name\", \"profile\", \"assistant_profile\", \"mode\"],\n        \"general_assistant\",\n    ),\n    \"general_assistant\",\n).lower()\n\naliases = {\n    \"general\": \"general_assistant\",\n    \"secretary\": \"general_assistant\",\n    \"personal\": \"general_assistant\",\n    \"personal_assistant\": \"general_assistant\",\n    \"admin\": \"general_assistant\",\n\n    \"hospitality\": \"hospitality_assistant\",\n    \"hut_ai\": \"hospitality_assistant\",\n    \"hutai\": \"hospitality_assistant\",\n    \"travel\": \"hospitality_assistant\",\n    \"travel_agent\": \"hospitality_assistant\",\n    \"property\": \"hospitality_assistant\",\n    \"property_manager\": \"hospitality_assistant\",\n    \"estate_manager\": \"hospitality_assistant\",\n    \"hotel\": \"hospitality_assistant\",\n    \"hotel_reception\": \"hospitality_assistant\",\n    \"receptionist\": \"hospitality_assistant\",\n    \"airbnb\": \"hospitality_assistant\",\n    \"airbnb_host\": \"hospitality_assistant\",\n    \"booking\": \"hospitality_assistant\",\n    \"booking_host\": \"hospitality_assistant\",\n    \"booking_com\": \"hospitality_assistant\",\n    \"bookings_manager\": \"hospitality_assistant\",\n}\n\nif requested_profile in [\"general_assistant\", \"hospitality_assistant\"]:\n    profile_name = requested_profile\nelse:\n    profile_name = aliases.get(requested_profile, \"general_assistant\")\n\nprofiles = {\n    \"general_assistant\": {\n        \"profile_name\": \"general_assistant\",\n        \"display_name\": \"General Personal Assistant\",\n        \"model\": \"onyx-fast\",\n        \"temperature\": 0.2,\n        \"max_tokens\": 900,\n        \"allowed_actions\": [\n            \"note_taking\",\n            \"task_summary\",\n            \"email_read_support\",\n            \"email_draft_support\",\n            \"calendar_read_support\",\n            \"calendar_draft_support\",\n            \"reminder_preparation\",\n            \"meeting_preparation\",\n            \"follow_up_tracking\",\n        ],\n        \"confirmation_required\": [\n            \"send_email\",\n            \"create_calendar_event\",\n            \"update_calendar_event\",\n            \"delete_calendar_event\",\n            \"contact_external_party\",\n            \"make_payment\",\n            \"change_account_settings\",\n        ],\n        \"system_prompt\": \"\"\"\nYou are a general personal assistant and secretary.\n\nRole:\n- Help with notes, summaries, reminders, calendar preparation, email reading support, email drafting, meeting preparation, and follow-up tracking.\n- Produce concise, practical, action-oriented outputs.\n- When drafting messages, provide the draft text clearly.\n- When information is missing, state the missing fields and make safe assumptions only when appropriate.\n\nOperational rules:\n- You may draft emails, calendar entries, reminders, task lists, notes, and summaries.\n- You must not claim that you sent an email, created or modified a calendar event, changed an account, contacted someone, made a payment, or performed any external action unless the system explicitly provides that tool result.\n- For any external action, ask for explicit confirmation first.\n- Keep responses focused. Do not introduce architecture, implementation, or broad product advice unless explicitly asked.\n\"\"\".strip(),\n    },\n\n    \"hospitality_assistant\": {\n        \"profile_name\": \"hospitality_assistant\",\n        \"display_name\": \"Hut AI Hospitality Assistant\",\n        \"model\": \"onyx-fast\",\n        \"temperature\": 0.3,\n        \"max_tokens\": 1400,\n        \"allowed_actions\": [\n            \"guest_communication_draft\",\n            \"welcome_letter_generation\",\n            \"checkin_checkout_instructions\",\n            \"house_rules_summary\",\n            \"local_recommendations\",\n            \"housekeeping_coordination_draft\",\n            \"booking_support\",\n            \"owner_finance_reminders\",\n            \"expense_tracking_support\",\n            \"pricing_recommendation_support\",\n            \"market_intelligence_summary\",\n            \"operations_report_generation\",\n        ],\n        \"confirmation_required\": [\n            \"send_guest_message\",\n            \"send_email\",\n            \"change_booking\",\n            \"cancel_booking\",\n            \"modify_availability\",\n            \"change_price\",\n            \"issue_refund\",\n            \"make_payment\",\n            \"contact_supplier\",\n            \"contact_housekeeper\",\n            \"update_ota_listing\",\n            \"store_sensitive_guest_data\",\n        ],\n        \"system_prompt\": \"\"\"\nYou are Hut AI, a hospitality, travel, and property operations assistant.\n\nTarget users:\n- Airbnb hosts;\n- Booking.com hosts;\n- short-term rental operators;\n- villas and small accommodation providers;\n- small hotels and hotel reception teams;\n- travel agencies;\n- estate managers;\n- property managers.\n\nRole:\n- Help with guest communication, bookings support, check-in/check-out information, welcome letters, housekeeping coordination, local recommendations, owner reminders, finance tracking support, reporting, and pricing or market-intelligence recommendations.\n\nHospitality capabilities:\n- Draft personalized guest messages.\n- Prepare welcome letters with arrival details, check-in instructions, house rules, transport options, local attractions, restaurants, shopping, weather notes, cultural events, and checkout guidance.\n- Prepare cleaner or housekeeper task notifications.\n- Summarize bookings, arrivals, departures, guest requests, operational tasks, and owner follow-ups.\n- Help track guest payments, outstanding balances, supplier invoices, housekeeping costs, utilities, and property-related reminders when data is provided.\n- Provide pricing and promotion suggestions based on available information.\n- Produce owner-facing summaries and cash-flow-style reports when data is provided.\n\nOperational rules:\n- You may draft, summarize, recommend, and prepare operational instructions.\n- You must not claim that you sent a guest message, changed a booking, changed prices, cancelled a reservation, issued a refund, contacted a supplier, contacted a cleaner, updated an OTA listing, made a payment, or performed any external action unless the system explicitly provides that tool result.\n- For any high-impact external action, ask for explicit confirmation first.\n- Treat allergies, health details, IDs, payment details, and guest preferences as sensitive operational information. Use only the minimum necessary detail.\n- Keep answers practical and formatted for hospitality operations.\n\"\"\".strip(),\n    },\n}\n\nprofile = profiles[profile_name]\nsystem_content = make_profile_system_content(profile)\n\nsource = body.get(\"source\") if body.get(\"source\") is not None else \"onyx\"\nmode = body.get(\"mode\") if body.get(\"mode\") is not None else profile_name\nmodel = body.get(\"model\") if body.get(\"model\") is not None else profile[\"model\"]\ntemperature = body.get(\"temperature\") if body.get(\"temperature\") is not None else profile[\"temperature\"]\nmax_tokens = body.get(\"max_tokens\") if body.get(\"max_tokens\") is not None else profile[\"max_tokens\"]\n\nreturn [\n    {\n        \"json\": {\n            \"task\": task,\n            \"source\": source,\n            \"mode\": mode,\n            \"profile_name\": profile_name,\n            \"profile\": profile,\n            \"llm\": {\n                \"model\": model,\n                \"temperature\": temperature,\n                \"max_tokens\": max_tokens,\n                \"stream\": False,\n                \"messages\": [\n                    {\n                        \"role\": \"system\",\n                        \"content\": system_content,\n                    },\n                    {\n                        \"role\": \"user\",\n                        \"content\": task,\n                    },\n                ],\n            },\n            \"request_meta\": {\n                \"original_mode\": body.get(\"mode\"),\n                \"original_profile_name\": body.get(\"profile_name\"),\n                \"original_profile\": body.get(\"profile\"),\n                \"resolved_profile_name\": profile_name,\n                \"has_task\": len(task) > 0,\n            },\n        },\n    }\n]"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        80,
+        16
+      ],
+      "id": "803eed17-629f-4f36-a739-8141da17dba4",
+      "name": "Code in Python"
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "Webhook": {
+      "main": [
+        [
+          {
+            "node": "Code in Python",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Edit Fields": {
+      "main": [
+        [
+          {
+            "node": "Respond to Webhook",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "HTTP Request": {
+      "main": [
+        [
+          {
+            "node": "Edit Fields",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Code in Python": {
+      "main": [
+        [
+          {
+            "node": "HTTP Request",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": true,
+  "settings": {
+    "executionOrder": "v1",
+    "binaryMode": "separate",
+    "availableInMCP": false,
+    "timeSavedMode": "fixed",
+    "callerPolicy": "workflowsFromSameOwner"
+  },
+  "versionId": "e1d166a2-4cfc-49d2-ba04-bb34fd21ce33",
+  "meta": {
+    "instanceId": "f3f14a12d083b26f75053c02c9f730b36c3df7ae13eac2921394c1be91b308f5"
+  },
+  "nodeGroups": [],
+  "id": "wgJmIxnYN8r5VTpe",
+  "tags": []
+}

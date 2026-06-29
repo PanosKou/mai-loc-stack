@@ -1,0 +1,186 @@
+{
+  "name": "web-scraper",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "scrape-url",
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2.1,
+      "position": [
+        0,
+        0
+      ],
+      "id": "19d3240c-6fbb-4e7c-b0ab-102cf11469a6",
+      "name": "Webhook",
+      "webhookId": "6f229bfa-5e3d-459b-ad81-dbc0c3b433d3"
+    },
+    {
+      "parameters": {
+        "url": "={{ $json.body.url.replaceAll('\"', '').trim() }}",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        224,
+        0
+      ],
+      "id": "aee448d7-17bd-4430-ac38-e99b90ee41a6",
+      "name": "HTTP Request"
+    },
+    {
+      "parameters": {
+        "operation": "extractHtmlContent",
+        "extractionValues": {
+          "values": [
+            {
+              "key": "title",
+              "cssSelector": "title"
+            },
+            {
+              "key": "h1",
+              "cssSelector": "h1"
+            },
+            {
+              "key": "text",
+              "cssSelector": "body",
+              "skipSelectors": "script, style, nav, footer, header, aside, noscript, svg, iframe"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.html",
+      "typeVersion": 1.2,
+      "position": [
+        448,
+        0
+      ],
+      "id": "c9ef2eb2-816a-430a-b488-3de2362b2bdd",
+      "name": "HTML"
+    },
+    {
+      "parameters": {
+        "options": {}
+      },
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.5,
+      "position": [
+        832,
+        0
+      ],
+      "id": "b186553b-5102-4cdc-b941-e550c6b565a1",
+      "name": "Respond to Webhook"
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "0d4faf1a-7f45-40d7-8482-e21b9f47344e",
+              "name": "requestedUrl",
+              "value": "={{ $('Webhook').first().json.body.url }}",
+              "type": "string"
+            },
+            {
+              "id": "df7f194e-a4db-4d67-84b8-1d7342fd7190",
+              "name": "title",
+              "value": "={{ $json.title }}",
+              "type": "string"
+            },
+            {
+              "id": "f4904c56-3e00-4fcb-8a13-67bcce92d85f",
+              "name": "h1",
+              "value": "={{ $json.h1 }}",
+              "type": "string"
+            },
+            {
+              "id": "3f4e093b-ab63-4643-907d-ac34924782b6",
+              "name": "text",
+              "value": "={{ $json.text }}",
+              "type": "string"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        656,
+        0
+      ],
+      "id": "7ff0fb4f-154a-4dbc-b52f-dc33ac70cbbf",
+      "name": "Edit Fields"
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "Webhook": {
+      "main": [
+        [
+          {
+            "node": "HTTP Request",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "HTTP Request": {
+      "main": [
+        [
+          {
+            "node": "HTML",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "HTML": {
+      "main": [
+        [
+          {
+            "node": "Edit Fields",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Respond to Webhook": {
+      "main": [
+        []
+      ]
+    },
+    "Edit Fields": {
+      "main": [
+        [
+          {
+            "node": "Respond to Webhook",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": true,
+  "settings": {
+    "executionOrder": "v1",
+    "binaryMode": "separate",
+    "availableInMCP": false
+  },
+  "versionId": "d8167f9e-528f-4c64-8f60-949a32779c52",
+  "meta": {
+    "instanceId": "f3f14a12d083b26f75053c02c9f730b36c3df7ae13eac2921394c1be91b308f5"
+  },
+  "nodeGroups": [],
+  "id": "RxuNR694Yp9eLuE0",
+  "tags": []
+}
