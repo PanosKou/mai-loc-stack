@@ -1,0 +1,187 @@
+{
+  "name": "Hut AI - Email Draft Reply",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "email-draft-reply",
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "id": "email-draft-reply-webhook",
+      "name": "Webhook - email-draft-reply",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2.1,
+      "position": [-960, 0],
+      "webhookId": "email-draft-reply"
+    },
+    {
+      "parameters": {
+        "jsCode": "const input = $input.first().json;\nconst body = input.body && typeof input.body === 'object' ? input.body : input;\n\nfunction clean(value) {\n  if (value === undefined || value === null) return '';\n  return String(value).trim();\n}\n\nconst messageId = clean(body.message_id);\nconst instructions = clean(body.reply_instructions);\nconst tone = clean(body.tone) || 'professional';\n\nreturn [\n  {\n    json: {\n      message_id: messageId,\n      reply_instructions: instructions,\n      tone,\n      create_gmail_draft: body.create_gmail_draft !== false && body.create_gmail_draft !== 'false',\n      send_email: false,\n      source: clean(body.source) || 'n8n-email-draft-reply'\n    }\n  }\n];"
+      },
+      "id": "normalize-draft-request",
+      "name": "Normalize Draft Request",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [-720, 0]
+    },
+    {
+      "parameters": {
+        "method": "GET",
+        "url": "=https://gmail.googleapis.com/gmail/v1/users/me/messages/{{ $json.message_id }}",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "googleOAuth2Api",
+        "sendQuery": true,
+        "queryParameters": {
+          "parameters": [
+            {
+              "name": "format",
+              "value": "full"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "gmail-get-source-message",
+      "name": "Gmail API - Get Source Message",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [-480, 0]
+    },
+    {
+      "parameters": {
+        "jsCode": "const source = $input.first().json;\n\nfunction decodeBase64Url(data) {\n  if (!data) return '';\n  let normalized = String(data).replace(/-/g, '+').replace(/_/g, '/');\n  while (normalized.length % 4) normalized += '=';\n  return Buffer.from(normalized, 'base64').toString('utf8');\n}\n\nfunction getHeader(payload, name) {\n  const headers = payload?.headers || [];\n  const found = headers.find((header) => String(header.name).toLowerCase() === String(name).toLowerCase());\n  return found ? found.value : '';\n}\n\nfunction collectBodyParts(part, out = { text: [], html: [] }) {\n  if (!part) return out;\n\n  const mimeType = part.mimeType || '';\n  const data = part.body?.data;\n\n  if (data && mimeType === 'text/plain') out.text.push(decodeBase64Url(data));\n  if (data && mimeType === 'text/html') out.html.push(decodeBase64Url(data));\n\n  for (const child of part.parts || []) collectBodyParts(child, out);\n  return out;\n}\n\nconst payload = source.payload || {};\nconst bodyParts = collectBodyParts(payload);\nconst body = bodyParts.text.join('\\n\\n').trim() || bodyParts.html.join('\\n\\n').trim();\n\nconst emailContext = {\n  message_id: source.id,\n  thread_id: source.threadId,\n  subject: getHeader(payload, 'Subject'),\n  from: getHeader(payload, 'From'),\n  to: getHeader(payload, 'To'),\n  cc: getHeader(payload, 'Cc'),\n  date: getHeader(payload, 'Date'),\n  message_id_header: getHeader(payload, 'Message-ID'),\n  references: getHeader(payload, 'References'),\n  in_reply_to: getHeader(payload, 'In-Reply-To'),\n  snippet: source.snippet || '',\n  body\n};\n\nconst request = $('Normalize Draft Request').first().json;\n\nconst langgraphPayload = {\n  model: 'onyx-fast',\n  messages: [\n    {\n      role: 'system',\n      content: 'You draft email replies. Use only the provided email context and user instructions. Return only the reply body. Do not claim the email was sent.'\n    },\n    {\n      role: 'user',\n      content: 'Email context:\\n' + JSON.stringify(emailContext, null, 2) +\n        '\\n\\nReply instructions:\\n' + request.reply_instructions +\n        '\\n\\nTone:\\n' + request.tone\n    }\n  ],\n  temperature: 0.2,\n  max_tokens: 900,\n  stream: false\n};\n\nreturn [\n  {\n    json: {\n      ...request,\n      email_context: emailContext,\n      langgraph_payload: langgraphPayload\n    }\n  }\n];"
+      },
+      "id": "prepare-langgraph-request",
+      "name": "Prepare LangGraph Request",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [-240, 0]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "http://langgraph-gateway:8000/v1/chat/completions",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "Bearer local-dummy-key"
+            },
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "bodyContentType": "json",
+        "jsonBody": "={{ $json.langgraph_payload }}",
+        "options": {}
+      },
+      "id": "langgraph-draft-reply",
+      "name": "LangGraph - Draft Reply",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [0, 0]
+    },
+    {
+      "parameters": {
+        "jsCode": "const current = $('Prepare LangGraph Request').first().json;\nconst llm = $input.first().json;\n\nfunction extractAnswer(payload) {\n  const choices = payload.choices || [];\n  if (!choices.length) return '';\n  const message = choices[0].message || {};\n  return String(message.content || choices[0].text || '').trim();\n}\n\nfunction getEmailAddress(value) {\n  const text = String(value || '');\n  const match = text.match(/<([^>]+)>/);\n  return (match ? match[1] : text).trim();\n}\n\nfunction base64Url(value) {\n  return Buffer.from(value, 'utf8')\n    .toString('base64')\n    .replace(/\\+/g, '-')\n    .replace(/\\//g, '_')\n    .replace(/=+$/g, '');\n}\n\nconst email = current.email_context;\nconst draftBody = extractAnswer(llm);\nconst to = getEmailAddress(email.from);\nconst subject = String(email.subject || '').toLowerCase().startsWith('re:')\n  ? email.subject\n  : 'Re: ' + (email.subject || '');\n\nconst headers = [\n  `To: ${to}`,\n  `Subject: ${subject}`,\n  'Content-Type: text/plain; charset=\"UTF-8\"',\n  'MIME-Version: 1.0'\n];\n\nif (email.message_id_header) headers.push(`In-Reply-To: ${email.message_id_header}`);\nif (email.references || email.message_id_header) {\n  headers.push(`References: ${[email.references, email.message_id_header].filter(Boolean).join(' ')}`);\n}\n\nconst raw = base64Url(headers.join('\\r\\n') + '\\r\\n\\r\\n' + draftBody);\n\nreturn [\n  {\n    json: {\n      draft_request: {\n        message: {\n          raw,\n          threadId: email.thread_id\n        }\n      },\n      message_id: email.message_id,\n      thread_id: email.thread_id,\n      subject,\n      to,\n      draft_body: draftBody,\n      send_email: false,\n      source: 'n8n-email-draft-reply'\n    }\n  }\n];"
+      },
+      "id": "build-gmail-draft-payload",
+      "name": "Build Gmail Draft Payload",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [240, 0]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://gmail.googleapis.com/gmail/v1/users/me/drafts",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "googleOAuth2Api",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "bodyContentType": "json",
+        "jsonBody": "={{ $json.draft_request }}",
+        "options": {}
+      },
+      "id": "gmail-create-draft",
+      "name": "Gmail API - Create Draft",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [480, 0]
+    },
+    {
+      "parameters": {
+        "jsCode": "const created = $input.first().json;\nconst draft = $('Build Gmail Draft Payload').first().json;\n\nreturn [\n  {\n    json: {\n      draft_created: Boolean(created.id),\n      draft_id: created.id || null,\n      message_id: draft.message_id,\n      thread_id: draft.thread_id,\n      subject: draft.subject,\n      to: draft.to,\n      draft_body: draft.draft_body,\n      send_email: false,\n      source: 'n8n-email-draft-reply'\n    }\n  }\n];"
+      },
+      "id": "normalize-draft-response",
+      "name": "Normalize Draft Response",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [720, 0]
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ $json }}",
+        "options": {
+          "responseCode": 200
+        }
+      },
+      "id": "respond-draft",
+      "name": "Respond to Webhook",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.4,
+      "position": [960, 0]
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "Webhook - email-draft-reply": {
+      "main": [[{"node": "Normalize Draft Request", "type": "main", "index": 0}]]
+    },
+    "Normalize Draft Request": {
+      "main": [[{"node": "Gmail API - Get Source Message", "type": "main", "index": 0}]]
+    },
+    "Gmail API - Get Source Message": {
+      "main": [[{"node": "Prepare LangGraph Request", "type": "main", "index": 0}]]
+    },
+    "Prepare LangGraph Request": {
+      "main": [[{"node": "LangGraph - Draft Reply", "type": "main", "index": 0}]]
+    },
+    "LangGraph - Draft Reply": {
+      "main": [[{"node": "Build Gmail Draft Payload", "type": "main", "index": 0}]]
+    },
+    "Build Gmail Draft Payload": {
+      "main": [[{"node": "Gmail API - Create Draft", "type": "main", "index": 0}]]
+    },
+    "Gmail API - Create Draft": {
+      "main": [[{"node": "Normalize Draft Response", "type": "main", "index": 0}]]
+    },
+    "Normalize Draft Response": {
+      "main": [[{"node": "Respond to Webhook", "type": "main", "index": 0}]]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "versionId": "0f76059c-84e8-4f44-ae10-c121e61a949f",
+  "meta": {
+    "templateCredsSetupCompleted": false,
+    "description": "Generated importable n8n workflow template for Hut AI email assistant."
+  },
+  "tags": []
+}

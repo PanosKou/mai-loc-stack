@@ -1,0 +1,148 @@
+{
+  "name": "Hut AI - Email Read",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "email-read",
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "id": "email-read-webhook",
+      "name": "Webhook - email-read",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2.1,
+      "position": [
+        -720,
+        0
+      ],
+      "webhookId": "email-read"
+    },
+    {
+      "parameters": {
+        "jsCode": "const input = $input.first().json;\nconst body = input.body && typeof input.body === 'object' ? input.body : input;\n\nfunction asString(value) {\n  if (value === undefined || value === null) return '';\n  return String(value).trim();\n}\n\nconst messageId = asString(body.message_id);\n\nreturn [\n  {\n    json: {\n      message_id: messageId,\n      include_body: body.include_body !== false && body.include_body !== 'false',\n      include_thread: body.include_thread !== false && body.include_thread !== 'false',\n      source: asString(body.source) || 'n8n-email-read'\n    }\n  }\n];"
+      },
+      "id": "normalize-read-request",
+      "name": "Normalize Read Request",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -480,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "method": "GET",
+        "url": "=https://gmail.googleapis.com/gmail/v1/users/me/messages/{{ $json.message_id }}",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "googleOAuth2Api",
+        "sendQuery": true,
+        "queryParameters": {
+          "parameters": [
+            {
+              "name": "format",
+              "value": "full"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "gmail-get-message",
+      "name": "Gmail API - Get Message",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        -240,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const message = $input.first().json;\n\nfunction decodeBase64Url(data) {\n  if (!data) return '';\n  let normalized = String(data).replace(/-/g, '+').replace(/_/g, '/');\n  while (normalized.length % 4) normalized += '=';\n  return Buffer.from(normalized, 'base64').toString('utf8');\n}\n\nfunction getHeader(payload, name) {\n  const headers = payload?.headers || [];\n  const found = headers.find((header) => String(header.name).toLowerCase() === String(name).toLowerCase());\n  return found ? found.value : '';\n}\n\nfunction collectBodyParts(part, out = { text: [], html: [] }) {\n  if (!part) return out;\n\n  const mimeType = part.mimeType || '';\n  const data = part.body?.data;\n\n  if (data && mimeType === 'text/plain') {\n    out.text.push(decodeBase64Url(data));\n  } else if (data && mimeType === 'text/html') {\n    out.html.push(decodeBase64Url(data));\n  }\n\n  for (const child of part.parts || []) {\n    collectBodyParts(child, out);\n  }\n\n  return out;\n}\n\nconst bodyParts = collectBodyParts(message.payload || {});\nconst bodyText = bodyParts.text.join('\\n\\n').trim();\nconst bodyHtml = bodyParts.html.join('\\n\\n').trim();\n\nconst payload = message.payload || {};\nconst subject = getHeader(payload, 'Subject');\nconst from = getHeader(payload, 'From');\nconst to = getHeader(payload, 'To');\nconst cc = getHeader(payload, 'Cc');\nconst date = getHeader(payload, 'Date');\nconst messageIdHeader = getHeader(payload, 'Message-ID');\n\nreturn [\n  {\n    json: {\n      message_id: message.id,\n      thread_id: message.threadId,\n      subject,\n      from,\n      to,\n      cc,\n      date,\n      message_id_header: messageIdHeader,\n      snippet: message.snippet || '',\n      label_ids: message.labelIds || [],\n      body: bodyText || bodyHtml || '',\n      body_format: bodyText ? 'text/plain' : (bodyHtml ? 'text/html' : 'unknown'),\n      send_email: false,\n      source: 'n8n-email-read'\n    }\n  }\n];"
+      },
+      "id": "normalize-message",
+      "name": "Normalize Message",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        0,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ $json }}",
+        "options": {
+          "responseCode": 200
+        }
+      },
+      "id": "respond-read",
+      "name": "Respond to Webhook",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.4,
+      "position": [
+        240,
+        0
+      ]
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "Webhook - email-read": {
+      "main": [
+        [
+          {
+            "node": "Normalize Read Request",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Normalize Read Request": {
+      "main": [
+        [
+          {
+            "node": "Gmail API - Get Message",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Gmail API - Get Message": {
+      "main": [
+        [
+          {
+            "node": "Normalize Message",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Normalize Message": {
+      "main": [
+        [
+          {
+            "node": "Respond to Webhook",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "versionId": "11ed691f-e172-4276-8ed6-062331cb2890",
+  "meta": {
+    "templateCredsSetupCompleted": false,
+    "description": "Generated importable n8n workflow template for Hut AI email assistant."
+  },
+  "tags": []
+}
