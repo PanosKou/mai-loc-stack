@@ -1,0 +1,152 @@
+{
+  "name": "Hut AI - Email Search",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "email-search",
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "id": "email-search-webhook",
+      "name": "Webhook - email-search",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2.1,
+      "position": [
+        -720,
+        0
+      ],
+      "webhookId": "email-search"
+    },
+    {
+      "parameters": {
+        "jsCode": "const input = $input.first().json;\nconst body = input.body && typeof input.body === 'object' ? input.body : input;\n\nfunction asString(value) {\n  if (value === undefined || value === null) return '';\n  return String(value).trim();\n}\n\nfunction asBool(value) {\n  return value === true || value === 'true' || value === 1 || value === '1';\n}\n\nlet maxResults = parseInt(body.max_results ?? 5, 10);\nif (!Number.isFinite(maxResults)) maxResults = 5;\nmaxResults = Math.max(1, Math.min(maxResults, 10));\n\nconst parts = [];\nconst query = asString(body.query);\nconst fromAddress = asString(body.from_address);\nconst subject = asString(body.subject);\n\nif (query) parts.push(query);\nif (asBool(body.unread_only)) parts.push('is:unread');\nif (fromAddress) parts.push(`from:${fromAddress}`);\nif (subject) parts.push(`subject:(${subject})`);\n\nreturn [\n  {\n    json: {\n      gmail_query: parts.join(' ').trim() || 'newer_than:7d',\n      max_results: maxResults,\n      unread_only: asBool(body.unread_only),\n      source: asString(body.source) || 'n8n-email-search'\n    }\n  }\n];"
+      },
+      "id": "normalize-search-request",
+      "name": "Normalize Search Request",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -480,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "method": "GET",
+        "url": "https://gmail.googleapis.com/gmail/v1/users/me/messages",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "googleOAuth2Api",
+        "sendQuery": true,
+        "queryParameters": {
+          "parameters": [
+            {
+              "name": "q",
+              "value": "={{ $json.gmail_query }}"
+            },
+            {
+              "name": "maxResults",
+              "value": "={{ $json.max_results }}"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "gmail-list-messages",
+      "name": "Gmail API - List Messages",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        -240,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const response = $input.first().json;\nconst rawMessages = Array.isArray(response.messages) ? response.messages : [];\n\nconst messages = rawMessages.map((message) => ({\n  message_id: message.id,\n  thread_id: message.threadId,\n  from: null,\n  subject: null,\n  date: null,\n  snippet: null,\n  unread: null\n}));\n\nreturn [\n  {\n    json: {\n      messages,\n      result_size_estimate: response.resultSizeEstimate ?? messages.length,\n      note: messages.length\n        ? 'Search returns Gmail message IDs. Call email_read with message_id for body, sender, subject, and snippet.'\n        : 'No matching messages found.',\n      source: 'n8n-email-search',\n      send_email: false\n    }\n  }\n];"
+      },
+      "id": "normalize-search-response",
+      "name": "Normalize Search Response",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        0,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ $json }}",
+        "options": {
+          "responseCode": 200
+        }
+      },
+      "id": "respond-search",
+      "name": "Respond to Webhook",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.4,
+      "position": [
+        240,
+        0
+      ]
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "Webhook - email-search": {
+      "main": [
+        [
+          {
+            "node": "Normalize Search Request",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Normalize Search Request": {
+      "main": [
+        [
+          {
+            "node": "Gmail API - List Messages",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Gmail API - List Messages": {
+      "main": [
+        [
+          {
+            "node": "Normalize Search Response",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Normalize Search Response": {
+      "main": [
+        [
+          {
+            "node": "Respond to Webhook",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "versionId": "08405373-95cf-4aad-9aaa-b50e5ef54a43",
+  "meta": {
+    "templateCredsSetupCompleted": false,
+    "description": "Generated importable n8n workflow template for Hut AI email assistant."
+  },
+  "tags": []
+}

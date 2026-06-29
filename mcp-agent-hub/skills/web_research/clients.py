@@ -1,0 +1,160 @@
+import logging
+from typing import Any
+
+import httpx
+
+from .config import settings
+from .failures import ResearchFailure
+from .text_utils import clean_text, extract_answer, is_http_url
+
+
+log = logging.getLogger("mcp-agent-hub.skills.web_research.clients")
+
+
+async def searxng_search(query: str, max_results: int) -> list[dict[str, str]]:
+    timeout = httpx.Timeout(settings.search_timeout_seconds)
+    limits = httpx.Limits(max_connections=3, max_keepalive_connections=1)
+
+    async with httpx.AsyncClient(timeout=timeout, limits=limits) as client:
+        response = await client.post(
+            settings.searxng_url,
+            data={
+                "q": query,
+                "format": "json",
+            },
+            headers={
+                "Content-Type": "application/x-www-form-urlencoded",
+            },
+        )
+
+    if response.status_code >= 400:
+        log.warning("searxng_request_failed status_code=%s", response.status_code)
+        raise ResearchFailure("searxng_request_failed")
+
+    try:
+        payload = response.json()
+    except ValueError:
+        log.warning("searxng_invalid_json")
+        raise ResearchFailure("searxng_invalid_json") from None
+
+    raw_results = payload.get("results") or []
+
+    results: list[dict[str, str]] = []
+    seen_urls: set[str] = set()
+
+    for item in raw_results:
+        url = clean_text(item.get("url"))
+
+        if not url or not is_http_url(url) or url in seen_urls:
+            continue
+
+        seen_urls.add(url)
+
+        title = clean_text(item.get("title")) or url
+        snippet = clean_text(item.get("content") or item.get("description") or "")
+
+        results.append(
+            {
+                "title": title,
+                "url": url,
+                "snippet": snippet,
+            }
+        )
+
+        if len(results) >= max_results:
+            break
+
+    return results
+
+
+async def scrape_url(url: str) -> dict[str, Any]:
+    timeout = httpx.Timeout(settings.scrape_timeout_seconds)
+    limits = httpx.Limits(max_connections=2, max_keepalive_connections=1)
+
+    async with httpx.AsyncClient(timeout=timeout, limits=limits) as client:
+        response = await client.post(
+            settings.scrape_url,
+            json={"url": url},
+            headers={"Content-Type": "application/json"},
+        )
+
+    if response.status_code >= 400:
+        log.warning("scrape_request_failed status_code=%s", response.status_code)
+        raise ResearchFailure("scrape_request_failed")
+
+    try:
+        payload = response.json()
+    except ValueError:
+        log.warning("scrape_invalid_json")
+        raise ResearchFailure("scrape_invalid_json") from None
+
+    if isinstance(payload, list):
+        if not payload:
+            return {}
+        payload = payload[0]
+
+    if not isinstance(payload, dict):
+        return {}
+
+    return payload
+
+
+async def call_langgraph(task: str, context: str) -> str:
+    endpoint = f"{settings.llm_base_url}/chat/completions"
+
+    system_prompt = (
+        "You are the summarisation step of a local web research pipeline. "
+        "Use only the supplied source snippets. "
+        "Keep the answer short, technical, and precise. "
+        "Prefer official documentation when present. "
+        "Cite sources inline using [1], [2], etc. "
+        "If the sources are insufficient, say that clearly."
+    )
+
+    user_prompt = (
+        f"Research task:\n{task}\n\n"
+        f"Source snippets:\n{context}\n\n"
+        "Return a short answer followed by a compact Sources section."
+    )
+
+    payload = {
+        "model": settings.llm_model,
+        "messages": [
+            {"role": "system", "content": system_prompt},
+            {"role": "user", "content": user_prompt},
+        ],
+        "temperature": settings.llm_temperature,
+        "max_tokens": settings.llm_max_tokens,
+        "stream": False,
+    }
+
+    timeout = httpx.Timeout(settings.llm_timeout_seconds)
+    limits = httpx.Limits(max_connections=1, max_keepalive_connections=1)
+
+    async with httpx.AsyncClient(timeout=timeout, limits=limits) as client:
+        response = await client.post(
+            endpoint,
+            json=payload,
+            headers={
+                "Authorization": f"Bearer {settings.llm_api_key}",
+                "Content-Type": "application/json",
+            },
+        )
+
+    if response.status_code >= 400:
+        log.warning("langgraph_request_failed status_code=%s", response.status_code)
+        raise ResearchFailure("langgraph_request_failed")
+
+    try:
+        payload = response.json()
+    except ValueError:
+        log.warning("langgraph_invalid_json")
+        raise ResearchFailure("langgraph_invalid_json") from None
+
+    answer = extract_answer(payload)
+
+    if not answer:
+        log.warning("langgraph_empty_answer")
+        raise ResearchFailure("langgraph_empty_answer")
+
+    return answer
